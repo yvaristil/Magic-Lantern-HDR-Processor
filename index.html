@@ -1,58 +1,88 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin">
-  <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp">
   <title>Magic Lantern HDR Video Merger</title>
   <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js"></script>
 </head>
 <body>
   <h1>Magic Lantern HDR Video Merger</h1>
   <input type="file" id="videoInput" accept="video/*">
-  <button onclick="processHDR()">Process HDR</button>
+  <button onclick="processHDR()">Process video</button>
   <div id="output"></div>
+  <div id="preview"></div>
 
-  <script>
-    const { createFFmpeg, fetchFile } = FFmpeg;
+  <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.0/dist/ffmpeg.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-    const ffmpeg = createFFmpeg({ log: true });
-    let frameData = [];
+<script>
+  const { createFFmpeg, fetchFile } = FFmpeg;
 
-    async function processHDR() {
-      const videoInput = document.getElementById('videoInput').files[0];
-      if (!videoInput) {
-        alert('Please select a video file!');
-        return;
-      }
+  const ffmpeg = createFFmpeg({ log: true });
+  let evenFrames = [];
+  let oddFrames = [];
 
-      // Load ffmpeg
-      if (!ffmpeg.isLoaded()) await ffmpeg.load();
-
-      // Write the video file to ffmpeg's filesystem
-      ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(videoInput));
-
-      // Extract frames (every frame as an image)
-      await ffmpeg.run('-i', 'input.mp4', '-vf', 'fps=1', 'frame%d.png');
-
-      // Read the generated frames
-      const files = ffmpeg.FS('readdir', '/');
-      const frameFiles = files.filter(fn => fn.match(/frame\d+\.png/));
-
-      // Separate frames into even and odd indices
-      frameData = [];
-      frameFiles.forEach((file, index) => {
-        const frameNum = parseInt(file.match(/\d+/)[0]);
-        if (frameNum % 2 === 0) {
-          frameData.push({ type: 'even', file, data: ffmpeg.FS('readFile', file) });
-        } else {
-          frameData.push({ type: 'odd', file, data: ffmpeg.FS('readFile', file) });
-        }
-      });
-
-      // Display result (for now, just log)
-      const output = document.getElementById('output');
-      output.innerHTML = `Separated ${frameData.length} frames: ${frameData.filter(f => f.type === 'even').length} even, ${frameData.filter(f => f.type === 'odd').length} odd`;
+  async function processHDR() {
+    const videoInput = document.getElementById('videoInput').files[0];
+    if (!videoInput) {
+      alert('Please select a video file!');
+      return;
     }
+
+    if (!ffmpeg.isLoaded()) await ffmpeg.load();
+
+    ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(videoInput));
+
+    await ffmpeg.run('-i', 'input.mp4', '-vf', 'fps=1', 'frame%d.png');
+
+    const files = ffmpeg.FS('readdir', '/');
+    const frameFiles = files.filter(fn => fn.match(/frame\d+\.png/));
+
+    evenFrames = [];
+    oddFrames = [];
+
+    frameFiles.forEach((file, index) => {
+      const frameNum = parseInt(file.match(/\d+/)[0]);
+      const frameData = ffmpeg.FS('readFile', file);
+      if (frameNum % 2 === 0) {
+        evenFrames.push({ file, data: frameData });
+      } else {
+        oddFrames.push({ file, data: frameData });
+      }
+    });
+
+    const output = document.getElementById('output');
+    output.innerHTML = `Separated ${frameFiles.length} frames: ${evenFrames.length} even, ${oddFrames.length} odd.`;
+
+    const preview = document.getElementById('preview');
+    preview.innerHTML = '';
+    [evenFrames[0], oddFrames[0]].forEach((frame, i) => {
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(new Blob([frame.data], { type: 'image/png' }));
+      img.style.width = '200px';
+      preview.appendChild(img);
+      if (i === 0) preview.appendChild(document.createTextNode(' (Even) '));
+      else preview.appendChild(document.createTextNode(' (Odd) '));
+    });
+
+    // Create ZIP file with all frames
+    const zip = new JSZip();
+    evenFrames.forEach((frame, i) => {
+      zip.file(`even_frame${i}.png`, frame.data);
+    });
+    oddFrames.forEach((frame, i) => {
+      zip.file(`odd_frame${i}.png`, frame.data);
+    });
+
+    // Generate + download the ZIP
+    zip.generateAsync({ type: 'blob' }).then(content => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(content);
+      a.download = 'frames.zip';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    });
+  }
   </script>
 </body>
 </html>
